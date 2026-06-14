@@ -1,0 +1,26 @@
+id: hello_world
+max_active_tasks: 4
+
+tasks:
+  - id: extract
+    component:
+      name: hello
+      image: ./examples/components/hello/hello.wasm
+
+  - id: transform_a
+    component:
+      name: hello
+      image: ./examples/components/hello/hello.wasm
+    depends_on: [extract]
+
+  - id: transform_b
+    component:
+      name: hello
+      image: ./examples/components/hello/hello.wasm
+    depends_on: [extract]
+
+  - id: load
+    component:
+      name: hello
+      image: ./examples/components/hello/hello.wasm
+    depends_on: [transform_a, transform_b]

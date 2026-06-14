@@ -1,0 +1,16 @@
+#!/bin/sh
+# Pre-commit hook: enforce rustfmt and a clean clippy build before each commit.
+#
+# Enable once per clone:
+#     git config core.hooksPath .githooks
+#
+# Skip on a one-off commit with:  git commit --no-verify
+set -eu
+
+echo "[pre-commit] cargo fmt --check"
+cargo fmt --all -- --check
+
+echo "[pre-commit] cargo clippy (warnings denied)"
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+echo "[pre-commit] OK"
