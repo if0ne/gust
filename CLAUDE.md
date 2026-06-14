@@ -54,6 +54,7 @@ Match the surrounding code. In particular:
 - **`anyhow::Result`** — refer to it by its fully-qualified path (`anyhow::Result<T>`); do **not** `use anyhow::Result;`. This keeps it visually distinct from `std::result::Result` / `sqlx::Result` at call sites.
 - **Locks use `parking_lot`** — for in-memory synchronization use `parking_lot::Mutex` / `parking_lot::RwLock`, not the `std::sync` equivalents. They don't poison, so `.lock()` / `.write()` return the guard directly with no `.unwrap()`.
 - **Blank line before the final expression** — when a function or block ends in its returned value (a trailing expression or `return`, e.g. `Ok(rows)`), leave one empty line before it to separate the result from the work above.
+- **No `mod.rs`** — never create `mod.rs`. Declare a module with submodules as a sibling file next to a same-named folder: `foo.rs` + `foo/` (e.g. `service/runtime.rs` + `service/runtime/`), not `foo/mod.rs`. (The lone existing `job/executor/mod.rs` is legacy; new modules follow the `foo.rs` pattern, and prefer migrating old ones when you touch them.)
 
 ## Architecture
 
