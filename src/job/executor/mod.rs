@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{
     infra::store::{Store, task_instance::TaskInstanceRow},
     service::{
-        runtime::{resolver::Resolver, runner::Runner},
+        runtime::{component::ComponentDesc, resolver::Resolver, runner::Runner},
         workflow::{graph, spec::WorkflowSpec},
     },
 };
@@ -17,8 +17,6 @@ pub struct Executor {
     runner: Arc<Runner>,
     resolver: Arc<dyn Resolver>,
     semaphore: Arc<tokio::sync::Semaphore>,
-    default_timeout: u64,
-    default_memory_mb: u64,
 }
 
 impl Executor {
@@ -27,16 +25,12 @@ impl Executor {
         runner: Arc<Runner>,
         resolver: Arc<dyn Resolver>,
         max_concurrency: usize,
-        default_timeout: u64,
-        default_memory_mb: u64,
     ) -> Self {
         Self {
             store,
             runner,
             resolver,
             semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrency)),
-            default_timeout,
-            default_memory_mb,
         }
     }
 
@@ -98,25 +92,33 @@ impl Executor {
             .find(|t| t.id == task.task_id)
             .ok_or_else(|| anyhow::anyhow!("task {} not in workflow spec", task.task_id))?;
 
-        // Resolve the component image to raw WASM bytes.
-        let image = match self.resolver.resolve(&task_spec.component.image).await {
-            Ok(img) => img,
-            Err(e) => {
-                let msg = format!("Component resolve error: {e:#}");
-                warn!(%msg);
-                self.store
-                    .mark_task_failed(task.id, None, Some(&msg))
-                    .await?;
-                self.advance_graph(&spec, task.workflow_run_id).await?;
-                return Ok(());
-            }
+        // Resolve the component image and load it into the run's workload, so
+        // the runner holds a pre-linked component keyed by task id.
+        let load = async {
+            let image = self.resolver.resolve(&task_spec.component.image).await?;
+            let desc = ComponentDesc {
+                name: task_spec.component.name.clone(),
+                bytes: image.bytes.to_vec(),
+                digest: Some(image.digest),
+                extensions: task_spec.component.extensions.clone(),
+            };
+            self.runner
+                .load_component(&run.workflow_id, &task.task_id, desc)
+                .await
         };
 
+        if let Err(e) = load.await {
+            let msg = format!("Component load error: {e:#}");
+            warn!(%msg);
+            self.store
+                .mark_task_failed(task.id, None, Some(&msg))
+                .await?;
+            self.advance_graph(&spec, task.workflow_run_id).await?;
+            return Ok(());
+        }
+
         // Run the WASM component.
-        let outcome = self
-            .runner
-            .run(&image.bytes, self.default_timeout, self.default_memory_mb)
-            .await?;
+        let outcome = self.runner.run(&run.workflow_id, &task.task_id).await?;
 
         // Persist logs.
         let stdout_str = String::from_utf8_lossy(&outcome.stdout);

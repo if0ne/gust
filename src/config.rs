@@ -10,8 +10,6 @@ pub struct Config {
     pub bind_addr: SocketAddr,
     pub executor_max_concurrency: usize,
     pub component_cache_dir: PathBuf,
-    pub default_task_timeout_seconds: u64,
-    pub default_task_memory_mb: u64,
 }
 
 impl Config {
@@ -47,12 +45,6 @@ impl Config {
             component_cache_dir: std::env::var("COMPONENT_CACHE_DIR")
                 .unwrap_or_else(|_| "./.cache/components".into())
                 .into(),
-            default_task_timeout_seconds: std::env::var("DEFAULT_TASK_TIMEOUT_SECONDS")
-                .unwrap_or_else(|_| "300".into())
-                .parse()?,
-            default_task_memory_mb: std::env::var("DEFAULT_TASK_MEMORY_MB")
-                .unwrap_or_else(|_| "256".into())
-                .parse()?,
         })
     }
 }

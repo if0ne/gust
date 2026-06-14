@@ -3,7 +3,7 @@ use std::{collections::HashMap, num::NonZeroU32};
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TaskSpec {
     pub id: String,
-    pub component: super::component::ComponentSpec,
+    pub component: crate::service::runtime::common::ComponentSpec,
     #[serde(default)]
     pub depends_on: Vec<String>,
 }

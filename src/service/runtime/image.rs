@@ -50,12 +50,3 @@ impl std::str::FromStr for ImageRef {
         }
     }
 }
-
-/// Specification for deploying a single WebAssembly component with its trigger and extension bindings.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ComponentSpec {
-    /// Component name
-    pub name: String,
-    /// Component image reference.
-    pub image: ImageRef,
-}

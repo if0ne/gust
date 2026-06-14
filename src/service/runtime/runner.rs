@@ -1,14 +1,16 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
-use anyhow::Result;
+use anyhow::Context as _;
 use bytes::Bytes;
-use wasmtime::{
-    Config, Engine, Store, StoreLimitsBuilder,
-    component::{Component, Linker, ResourceTable},
-};
-use wasmtime_wasi::{
-    WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView,
-    p2::{bindings::Command, pipe::MemoryOutputPipe},
+use parking_lot::RwLock;
+use wasmtime_wasi::p2::{bindings::CommandPre, pipe::MemoryOutputPipe};
+
+use super::{
+    common::{ComponentId, ExtensionId},
+    component::{ComponentDesc, ResolvedComponent, UnresolvedComponent},
+    ctx::ContextBuilder,
+    engine::Engine,
+    extension::Extension,
 };
 
 /// Outcome of running a WASM component.
@@ -20,118 +22,182 @@ pub struct RunOutcome {
     pub stderr: Bytes,
 }
 
-struct RunState {
-    wasi: WasiCtx,
-    table: ResourceTable,
-    limits: wasmtime::StoreLimits,
-}
-
-impl WasiView for RunState {
-    fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView {
-            ctx: &mut self.wasi,
-            table: &mut self.table,
-        }
-    }
-}
-
-pub struct Runner {
-    engine: Engine,
-    linker: Arc<Linker<RunState>>,
-}
-
 // Max bytes captured per stream to prevent OOM from verbose components.
 const MAX_LOG_BYTES: usize = 4 * 1024 * 1024; // 4 MiB
 
+/// The resolved components of a single workflow, keyed by task id
+/// (the component id within the workload).
+#[derive(Default)]
+struct Workload {
+    components: HashMap<String, ResolvedComponent>,
+}
+
+/// Runs WebAssembly components against a single shared [`Engine`].
+///
+/// The engine — and its compiled-component cache — is shared across every
+/// workflow. Each workload keeps its resolved components around so repeated
+/// runs reuse the pre-linked component instead of recompiling.
+pub struct Runner {
+    engine: Engine,
+    extensions: HashMap<ExtensionId, Arc<dyn Extension>>,
+    workloads: RwLock<HashMap<String, Workload>>,
+}
+
 impl Runner {
-    pub fn new() -> Result<Self> {
-        let mut cfg = Config::new();
-        cfg.wasm_component_model(true);
-        cfg.epoch_interruption(true);
+    pub async fn start(&self) -> anyhow::Result<()> {
+        let mut errors = Vec::new();
 
-        let engine = Engine::new(&cfg)?;
+        for extension in self.extensions.values() {
+            if let Err(err) = extension.start().await {
+                errors.push(format!("extension '{}': {err:#}", extension.name()));
+            }
+        }
 
-        let mut linker: Linker<RunState> = Linker::new(&engine);
-        wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+        if !errors.is_empty() {
+            anyhow::bail!(
+                "{} extensions and triggers failed to start:\n{}",
+                errors.len(),
+                errors.join("\n")
+            );
+        }
 
-        // Background thread increments epoch every 100 ms.
-        // set_epoch_deadline(N) = interrupt after N × 100 ms.
-        let engine_tick = engine.clone();
-        std::thread::Builder::new()
-            .name("epoch-ticker".into())
-            .spawn(move || {
-                loop {
-                    std::thread::sleep(Duration::from_millis(100));
-                    engine_tick.increment_epoch();
-                }
-            })?;
+        log::info!("Runtime started");
 
-        Ok(Self {
-            engine,
-            linker: Arc::new(linker),
-        })
+        Ok(())
     }
 
-    pub async fn run(
+    pub async fn stop(&self) -> anyhow::Result<()> {
+        let mut errors = Vec::new();
+
+        for extension in self.extensions.values() {
+            if let Err(err) = extension.stop().await {
+                errors.push(format!("extension '{}': {err:#}", extension.name()));
+            }
+        }
+
+        if !errors.is_empty() {
+            anyhow::bail!(
+                "{} extension(s) failed to stop:\n{}",
+                errors.len(),
+                errors.join("\n")
+            );
+        }
+
+        log::info!("Runtime stopped");
+
+        Ok(())
+    }
+
+    /// Compiles and resolves `desc`, storing it under `workload_id` keyed by
+    /// `component_id`. Idempotent — reloading overwrites the previous entry.
+    ///
+    /// Compilation itself is cached on the engine by content digest, so
+    /// reloading an unchanged component is cheap.
+    pub async fn load_component(
         &self,
-        wasm: &[u8],
-        timeout_seconds: u64,
-        memory_mb: u64,
-    ) -> Result<RunOutcome> {
+        workload_id: &str,
+        component_id: &str,
+        desc: ComponentDesc,
+    ) -> anyhow::Result<()> {
+        let id = ComponentId::new(uuid::Uuid::new_v4());
+        let resolved = UnresolvedComponent::new(
+            id,
+            self.engine.clone(),
+            desc,
+            UnresolvedComponent::extract_world,
+        )
+        .context("failed to load component")?
+        .resolve(&self.extensions)
+        .await?;
+
+        self.workloads
+            .write()
+            .entry(workload_id.to_owned())
+            .or_default()
+            .components
+            .insert(component_id.to_owned(), resolved);
+
+        Ok(())
+    }
+
+    /// Returns true if `component_id` is loaded in `workload_id`.
+    #[allow(dead_code)]
+    pub fn has_component(&self, workload_id: &str, component_id: &str) -> bool {
+        self.workloads
+            .read()
+            .get(workload_id)
+            .is_some_and(|w| w.components.contains_key(component_id))
+    }
+
+    /// Drops a workload and every component it holds.
+    #[allow(dead_code)]
+    pub fn remove_workload(&self, workload_id: &str) {
+        self.workloads.write().remove(workload_id);
+    }
+
+    /// Runs the `wasi:cli/run` export of a previously loaded component.
+    pub async fn run(&self, workload_id: &str, component_id: &str) -> anyhow::Result<RunOutcome> {
+        // `ResolvedComponent` is `Arc`-backed, so clone it out of the lock and
+        // run without holding the registry locked for the task's lifetime.
+        let component = self
+            .workloads
+            .read()
+            .get(workload_id)
+            .and_then(|w| w.components.get(component_id).cloned())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "component '{component_id}' is not loaded in workload '{workload_id}'"
+                )
+            })?;
+
+        self.run_component(&component).await
+    }
+
+    async fn run_component(&self, component: &ResolvedComponent) -> anyhow::Result<RunOutcome> {
         let stdout_pipe = MemoryOutputPipe::new(MAX_LOG_BYTES);
         let stderr_pipe = MemoryOutputPipe::new(MAX_LOG_BYTES);
 
-        let mut builder = WasiCtxBuilder::new();
-        builder.stdout(stdout_pipe.clone());
-        builder.stderr(stderr_pipe.clone());
-        let wasi = builder.build();
+        let mut ctx_builder = ContextBuilder::new(component.id().clone());
+        ctx_builder.wasi_ctx_builder().stdout(stdout_pipe.clone());
+        ctx_builder.wasi_ctx_builder().stderr(stderr_pipe.clone());
+        for extension in component.extensions().values() {
+            extension.configure_ctx(&mut ctx_builder)?;
+        }
 
-        let limits = StoreLimitsBuilder::new()
-            .memory_size((memory_mb * 1024 * 1024) as usize)
-            .build();
+        let mut store = self.engine.new_store(ctx_builder.build())?;
 
-        let state = RunState {
-            wasi,
-            table: ResourceTable::new(),
-            limits,
-        };
-        let mut store = Store::new(&self.engine, state);
-        store.limiter(|s| &mut s.limits);
-
-        // 10 ticks/sec; each tick = 100 ms.
-        store.set_epoch_deadline(timeout_seconds * 10);
-
-        let component = Component::from_binary(&self.engine, wasm)
-            .map_err(|e| anyhow::anyhow!("Failed to compile WASM component: {e}"))?;
-
-        let cmd = Command::instantiate_async(&mut store, &component, &self.linker)
+        let instance_pre = component.instantiate_pre()?;
+        let command_pre = CommandPre::new(instance_pre)
+            .map_err(|e| anyhow::anyhow!("component does not export wasi:cli/run: {e}"))?;
+        let command = command_pre
+            .instantiate_async(&mut store)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to instantiate WASM component: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("failed to instantiate WASM component: {e}"))?;
 
-        let result = cmd.wasi_cli_run().call_run(&mut store).await;
+        let result = command.wasi_cli_run().call_run(&mut store).await;
 
         let stdout = stdout_pipe.contents();
         let stderr = stderr_pipe.contents();
 
-        match result {
-            Ok(Ok(())) => Ok(RunOutcome {
+        let outcome = match result {
+            Ok(Ok(())) => RunOutcome {
                 success: true,
                 exit_code: Some(0),
                 error: None,
                 stdout,
                 stderr,
-            }),
-            Ok(Err(())) => Ok(RunOutcome {
+            },
+            Ok(Err(())) => RunOutcome {
                 success: false,
                 exit_code: Some(1),
                 error: Some("Component exited with error".into()),
                 stdout,
                 stderr,
-            }),
+            },
             Err(e) => {
                 let msg = e.to_string();
                 let is_timeout = msg.contains("epoch") || msg.contains("interrupt");
-                Ok(RunOutcome {
+                RunOutcome {
                     success: false,
                     exit_code: None,
                     error: Some(if is_timeout {
@@ -141,8 +207,48 @@ impl Runner {
                     }),
                     stdout,
                     stderr,
-                })
+                }
             }
-        }
+        };
+
+        Ok(outcome)
+    }
+}
+
+#[derive(Default)]
+pub struct RunnerBuilder {
+    engine: Option<Engine>,
+    extensions: HashMap<ExtensionId, Arc<dyn Extension>>,
+}
+
+impl RunnerBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[allow(dead_code)]
+    pub fn engine(mut self, engine: Engine) -> Self {
+        self.engine = Some(engine);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn extension(mut self, extension: Arc<dyn Extension>) -> Self {
+        self.extensions.insert(extension.id(), extension);
+        self
+    }
+
+    pub fn build(self) -> anyhow::Result<Runner> {
+        let engine = if let Some(engine) = self.engine {
+            engine
+        } else {
+            Engine::new()?
+        };
+
+        Ok(Runner {
+            engine,
+            extensions: self.extensions,
+            workloads: Default::default(),
+        })
     }
 }

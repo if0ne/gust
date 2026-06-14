@@ -17,7 +17,7 @@ use crate::{
     job::executor::Executor,
     service::runtime::{
         resolver::{DefaultResolver, Resolver},
-        runner::Runner,
+        runner::RunnerBuilder,
     },
 };
 
@@ -48,7 +48,11 @@ async fn main() -> Result<()> {
             Arc::new(MemoryStore::new())
         }
     };
-    let runner = Arc::new(Runner::new()?);
+
+    let runner = RunnerBuilder::new().build()?;
+    runner.start().await?;
+
+    let runner = Arc::new(runner);
     info!(base_dir = %cfg.workflow_base_dir.display(), "Local component base directory");
     let resolver: Arc<dyn Resolver> = Arc::new(DefaultResolver::new(
         &cfg.component_cache_dir,
@@ -60,8 +64,6 @@ async fn main() -> Result<()> {
         Arc::clone(&runner),
         Arc::clone(&resolver),
         cfg.executor_max_concurrency,
-        cfg.default_task_timeout_seconds,
-        cfg.default_task_memory_mb,
     ));
 
     // Spawn the executor loop. Workflows run only when triggered via the API.
@@ -74,6 +76,8 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&cfg.bind_addr).await?;
     info!(addr = %cfg.bind_addr, "HTTP server listening");
     axum::serve(listener, app).await?;
+
+    runner.stop().await?;
 
     Ok(())
 }

@@ -4,8 +4,6 @@ use anyhow::Context as _;
 use base64::{Engine, prelude::BASE64_STANDARD};
 use sha2::Digest;
 
-use crate::service::workflow::component::ImageRef;
-
 /// Resolved WebAssembly component image containing raw bytes and a content digest.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -18,7 +16,7 @@ pub struct ResolvedImage {
 
 #[async_trait::async_trait]
 pub trait Resolver: Send + Sync {
-    async fn resolve(&self, image_ref: &ImageRef) -> anyhow::Result<ResolvedImage>;
+    async fn resolve(&self, image_ref: &super::image::ImageRef) -> anyhow::Result<ResolvedImage>;
 }
 
 #[allow(dead_code)]
@@ -63,12 +61,16 @@ impl DefaultResolver {
 #[async_trait::async_trait]
 impl Resolver for DefaultResolver {
     #[tracing::instrument(skip(self), fields(image_ref = %image_ref))]
-    async fn resolve(&self, image_ref: &ImageRef) -> anyhow::Result<ResolvedImage> {
+    async fn resolve(&self, image_ref: &super::image::ImageRef) -> anyhow::Result<ResolvedImage> {
         match image_ref {
-            ImageRef::RelativePath(path) => resolve_relative_path(path, &self.base_dir).await,
-            ImageRef::AbsolutePath(path) => resolve_file_source(path).await,
-            ImageRef::Base64(data) => resolve_data_source(data).await,
-            ImageRef::Oci(image_ref) => resolve_oci_source(&self.oci_client, image_ref).await,
+            super::image::ImageRef::RelativePath(path) => {
+                resolve_relative_path(path, &self.base_dir).await
+            }
+            super::image::ImageRef::AbsolutePath(path) => resolve_file_source(path).await,
+            super::image::ImageRef::Base64(data) => resolve_data_source(data).await,
+            super::image::ImageRef::Oci(image_ref) => {
+                resolve_oci_source(&self.oci_client, image_ref).await
+            }
         }
     }
 }
