@@ -28,7 +28,7 @@ pub(crate) async fn create_workflow(
         .map_err(|e| ApiError::bad_request(format!("workflow validation error: {e}")))?;
 
     // Persist a canonical YAML rendering of the validated spec for display.
-    let yaml = serde_yml::to_string(&spec)
+    let yaml = serde_yaml::to_string(&spec)
         .map_err(|e| ApiError::internal(format!("Failed to serialize workflow: {e}")))?;
 
     state.store.upsert_workflow(&yaml, &spec).await?;

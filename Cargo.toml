@@ -4,32 +4,49 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1"
-async-trait = "0.1.89"
-axum = { version = "0.8", features = ["macros"] }
-base64 = "0.22.1"
-bytes = "1"
-chrono = { version = "0.4", features = ["serde"] }
-croner = "2"
-log = "0.4.32"
-oci-client = "0.16"
-oci-wasm = "0.4.0"
-parking_lot = "0.12.5"
-petgraph = "0.6"
-rust-embed-for-web = "11"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yml = "0.0"
-sha2 = "0.10.0"
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
-tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["io"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-uuid = { version = "1", features = ["v4", "serde"] }
-wasmtime = { version = "45", features = ["component-model", "async"] }
-wasmtime-wasi = "45"
+anyhow = { version = "1", default-features = false }
+async-trait = { version = "0.1.89", default-features = false }
+axum = { version = "0.8", default-features = false, features = [
+    "macros",
+    "json",
+    "tokio",
+    "http1",
+] }
+base64 = { version = "0.22.1", default-features = false }
+bytes = { version = "1", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
+log = { version = "0.4.32", default-features = false }
+oci-client = { version = "0.16", default-features = false, features = ["rustls-tls"] }
+oci-wasm = { version = "0.4.0", default-features = false }
+parking_lot = { version = "0.12.5", default-features = false }
+petgraph = { version = "0.6", default-features = false }
+rust-embed-for-web = { version = "11", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false }
+serde_yaml = { version = "0.9.34", default-features = false }
+sha2 = { version = "0.10.0", default-features = false }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "postgres",
+    "uuid",
+    "chrono",
+    "json",
+    "migrate",
+    "macros",
+] }
+tokio = { version = "1", default-features = false, features = ["full"] }
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
+tower-http = { version = "0.6", default-features = false, features = ["cors", "trace"] }
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
+uuid = { version = "1", default-features = false, features = ["v4", "serde"] }
+wasmtime = { version = "45", default-features = false, features = [
+    "anyhow",
+    "async",
+    "component-model",
+    "cranelift",
+] }
+wasmtime-wasi = { version = "45", default-features = false }
 
 [profile.release]
 opt-level = 3
