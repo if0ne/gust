@@ -16,7 +16,7 @@ use crate::{
     infra::store::{Store, in_memory::MemoryStore, postgres::PostgresStore},
     job::executor::Executor,
     service::runtime::{
-        resolver::{DefaultResolver, Resolver},
+        image::{DefaultResolver, Resolver},
         runner::RunnerBuilder,
     },
 };

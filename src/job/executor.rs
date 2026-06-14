@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{
     infra::store::{Store, task_instance::TaskInstanceRow},
     service::{
-        runtime::{component::ComponentDesc, resolver::Resolver, runner::Runner},
+        runtime::{image::Resolver, runner::Runner, types::ComponentDesc},
         workflow::{graph, spec::WorkflowSpec},
     },
 };

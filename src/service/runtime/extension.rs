@@ -2,14 +2,14 @@
 // wired into the executor yet.
 #![allow(dead_code)]
 
-use std::{any::Any, collections::HashSet, sync::Arc};
+use std::{any::Any, collections::HashSet};
 
 /// Trait for extending the runtime with additional capabilities during component lifecycle.
 #[async_trait::async_trait]
-pub trait Extension: Any + Send + Sync + 'static {
+pub(crate) trait Extension: Any + Send + Sync + 'static {
     /// Returns the unique identifier for this extension.
-    fn id(&self) -> super::common::ExtensionId {
-        super::common::ExtensionId::from_type::<Self>()
+    fn id(&self) -> super::types::ExtensionId {
+        super::types::ExtensionId::from_type::<Self>()
     }
 
     /// Returns the human-readable name of this extension.
@@ -46,55 +46,12 @@ pub trait Extension: Any + Send + Sync + 'static {
     }
 
     /// Called when a component is being unbound from the runtime.
-    async fn on_component_unbind(&self, _id: &super::common::ComponentId) -> anyhow::Result<()> {
+    async fn on_component_unbind(&self, _id: &super::types::ComponentId) -> anyhow::Result<()> {
         Ok(())
     }
 
     /// Called when the extension is stopped.
     async fn stop(&self) -> anyhow::Result<()> {
         Ok(())
-    }
-}
-
-/// A resolved pairing of an extension with the WIT interfaces it matched against a component.
-pub struct ResolvedExtension {
-    pub(crate) extension: Arc<dyn Extension>,
-    pub(crate) interfaces: HashSet<super::wit::WitInterface>,
-    pub(crate) config: Option<serde_json::Value>,
-}
-
-impl ResolvedExtension {
-    /// Creates a new resolved extension with the given extension and matched interfaces.
-    pub fn new(
-        extension: Arc<dyn Extension>,
-        interfaces: HashSet<super::wit::WitInterface>,
-        config: Option<serde_json::Value>,
-    ) -> Self {
-        Self {
-            extension,
-            interfaces,
-            config,
-        }
-    }
-
-    /// Returns a reference to the underlying extension.
-    pub fn extension(&self) -> &dyn Extension {
-        &*self.extension
-    }
-
-    /// Returns the set of WIT interfaces this extension was matched against.
-    pub fn interfaces(&self) -> &HashSet<super::wit::WitInterface> {
-        &self.interfaces
-    }
-}
-
-impl std::fmt::Debug for ResolvedExtension {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ResolvedExtension")
-            .field("extension", &self.extension.name())
-            .field("backend", &self.extension.backend())
-            .field("interfaces", &self.interfaces)
-            .field("config", &self.config)
-            .finish()
     }
 }

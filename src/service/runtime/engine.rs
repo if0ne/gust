@@ -8,7 +8,7 @@ const DEFAULT_EPOCH_PRECISION_MS: u64 = 10;
 
 /// Wrapper around [`wasmtime::Engine`] with project-specific defaults.
 #[derive(Clone, Debug)]
-pub struct Engine {
+pub(super) struct Engine {
     inner: wasmtime::Engine,
     component_cache: super::cache::ComponentCache,
     deadline: Duration,
@@ -18,7 +18,7 @@ pub struct Engine {
 
 impl Engine {
     /// Creates a new engine with async support, epoch-based interruption, and optional pooling allocator.
-    pub fn new() -> anyhow::Result<Self> {
+    pub(super) fn new() -> anyhow::Result<Self> {
         let mut config = wasmtime::Config::new();
         config.epoch_interruption(true);
 
@@ -42,15 +42,15 @@ impl Engine {
         })
     }
 
-    pub(crate) fn wasmtime_engine(&self) -> &wasmtime::Engine {
+    pub(super) fn wasmtime_engine(&self) -> &wasmtime::Engine {
         &self.inner
     }
 
-    pub(crate) fn new_linker(&self) -> wasmtime::component::Linker<super::ctx::Context> {
+    pub(super) fn new_linker(&self) -> wasmtime::component::Linker<super::ctx::Context> {
         wasmtime::component::Linker::new(&self.inner)
     }
 
-    pub(crate) fn new_component(
+    pub(super) fn new_component(
         &self,
         bytes: &[u8],
         digest: Option<String>,
@@ -71,7 +71,7 @@ impl Engine {
         Ok(component)
     }
 
-    pub(crate) fn new_store(
+    pub(super) fn new_store(
         &self,
         data: super::ctx::Context,
     ) -> anyhow::Result<wasmtime::Store<super::ctx::Context>> {

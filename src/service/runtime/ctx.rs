@@ -2,10 +2,14 @@
 // wired into the executor yet.
 #![allow(dead_code)]
 
-use super::common::ComponentId;
+use super::types::ComponentId;
 
 /// Store context for a WebAssembly component instance, holding WASI and HTTP state.
-pub struct Context {
+///
+/// This is the wasmtime store data (`Store<Context>`); extensions naming
+/// `Linker<Context>` to register host functions must be able to reference it,
+/// so it stays `pub(crate)` even though the runtime owns its construction.
+pub(crate) struct Context {
     owner: ComponentId,
     wasi_ctx: wasmtime_wasi::WasiCtx,
     wasi_http_ctx: wasmtime_wasi_http::WasiHttpCtx,
@@ -42,15 +46,18 @@ struct CtxHttpHooks;
 
 impl wasmtime_wasi_http::p2::WasiHttpHooks for CtxHttpHooks {}
 
-/// Builder for constructing a [`ComponentContext`] with WASI configuration.
-pub struct ContextBuilder {
+/// Builder for constructing a [`Context`] with WASI configuration.
+///
+/// Handed to extensions via [`super::extension::Extension::configure_ctx`], so it
+/// is part of the extension-author surface; the runtime itself drives `new`/`build`.
+pub(crate) struct ContextBuilder {
     owner: ComponentId,
     wasi_ctx_builder: wasmtime_wasi::WasiCtxBuilder,
 }
 
 impl ContextBuilder {
     /// Creates a new context builder with default settings.
-    pub fn new(owner: ComponentId) -> Self {
+    pub(super) fn new(owner: ComponentId) -> Self {
         Self {
             owner,
             wasi_ctx_builder: wasmtime_wasi::WasiCtx::builder(),
@@ -58,17 +65,17 @@ impl ContextBuilder {
     }
 
     /// Returns a reference to the owner component ID.
-    pub fn owner(&self) -> &ComponentId {
+    pub(super) fn owner(&self) -> &ComponentId {
         &self.owner
     }
 
     /// Returns a mutable reference to the underlying WASI context builder.
-    pub fn wasi_ctx_builder(&mut self) -> &mut wasmtime_wasi::WasiCtxBuilder {
+    pub(crate) fn wasi_ctx_builder(&mut self) -> &mut wasmtime_wasi::WasiCtxBuilder {
         &mut self.wasi_ctx_builder
     }
 
-    /// Builds the [`ComponentContext`] from the configured builder state.
-    pub fn build(mut self) -> Context {
+    /// Builds the [`Context`] from the configured builder state.
+    pub(super) fn build(mut self) -> Context {
         Context {
             owner: self.owner,
             wasi_ctx: self.wasi_ctx_builder.build(),

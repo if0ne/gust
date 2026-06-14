@@ -6,15 +6,16 @@ use parking_lot::RwLock;
 use wasmtime_wasi::p2::{bindings::CommandPre, pipe::MemoryOutputPipe};
 
 use super::{
-    common::{ComponentId, ExtensionId},
-    component::{ComponentDesc, ResolvedComponent, UnresolvedComponent},
+    component::UnresolvedComponent,
     ctx::ContextBuilder,
     engine::Engine,
     extension::Extension,
+    resolved::ResolvedComponent,
+    types::{ComponentDesc, ComponentId, ExtensionId},
 };
 
 /// Outcome of running a WASM component.
-pub struct RunOutcome {
+pub(crate) struct RunOutcome {
     pub success: bool,
     pub exit_code: Option<i32>,
     pub error: Option<String>,
@@ -37,14 +38,14 @@ struct Workload {
 /// The engine — and its compiled-component cache — is shared across every
 /// workflow. Each workload keeps its resolved components around so repeated
 /// runs reuse the pre-linked component instead of recompiling.
-pub struct Runner {
+pub(crate) struct Runner {
     engine: Engine,
     extensions: HashMap<ExtensionId, Arc<dyn Extension>>,
     workloads: RwLock<HashMap<String, Workload>>,
 }
 
 impl Runner {
-    pub async fn start(&self) -> anyhow::Result<()> {
+    pub(crate) async fn start(&self) -> anyhow::Result<()> {
         let mut errors = Vec::new();
 
         for extension in self.extensions.values() {
@@ -66,7 +67,7 @@ impl Runner {
         Ok(())
     }
 
-    pub async fn stop(&self) -> anyhow::Result<()> {
+    pub(crate) async fn stop(&self) -> anyhow::Result<()> {
         let mut errors = Vec::new();
 
         for extension in self.extensions.values() {
@@ -93,7 +94,7 @@ impl Runner {
     ///
     /// Compilation itself is cached on the engine by content digest, so
     /// reloading an unchanged component is cheap.
-    pub async fn load_component(
+    pub(crate) async fn load_component(
         &self,
         workload_id: &str,
         component_id: &str,
@@ -122,7 +123,7 @@ impl Runner {
 
     /// Returns true if `component_id` is loaded in `workload_id`.
     #[allow(dead_code)]
-    pub fn has_component(&self, workload_id: &str, component_id: &str) -> bool {
+    pub(crate) fn has_component(&self, workload_id: &str, component_id: &str) -> bool {
         self.workloads
             .read()
             .get(workload_id)
@@ -131,12 +132,16 @@ impl Runner {
 
     /// Drops a workload and every component it holds.
     #[allow(dead_code)]
-    pub fn remove_workload(&self, workload_id: &str) {
+    pub(crate) fn remove_workload(&self, workload_id: &str) {
         self.workloads.write().remove(workload_id);
     }
 
     /// Runs the `wasi:cli/run` export of a previously loaded component.
-    pub async fn run(&self, workload_id: &str, component_id: &str) -> anyhow::Result<RunOutcome> {
+    pub(crate) async fn run(
+        &self,
+        workload_id: &str,
+        component_id: &str,
+    ) -> anyhow::Result<RunOutcome> {
         // `ResolvedComponent` is `Arc`-backed, so clone it out of the lock and
         // run without holding the registry locked for the task's lifetime.
         let component = self
@@ -216,37 +221,24 @@ impl Runner {
 }
 
 #[derive(Default)]
-pub struct RunnerBuilder {
-    engine: Option<Engine>,
+pub(crate) struct RunnerBuilder {
     extensions: HashMap<ExtensionId, Arc<dyn Extension>>,
 }
 
 impl RunnerBuilder {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     #[allow(dead_code)]
-    pub fn engine(mut self, engine: Engine) -> Self {
-        self.engine = Some(engine);
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn extension(mut self, extension: Arc<dyn Extension>) -> Self {
+    pub(crate) fn extension(mut self, extension: Arc<dyn Extension>) -> Self {
         self.extensions.insert(extension.id(), extension);
         self
     }
 
-    pub fn build(self) -> anyhow::Result<Runner> {
-        let engine = if let Some(engine) = self.engine {
-            engine
-        } else {
-            Engine::new()?
-        };
-
+    pub(crate) fn build(self) -> anyhow::Result<Runner> {
         Ok(Runner {
-            engine,
+            engine: Engine::new()?,
             extensions: self.extensions,
             workloads: Default::default(),
         })

@@ -10,14 +10,14 @@ use std::{
 
 /// Describes the imports and exports of a WebAssembly component world.
 #[derive(Clone, Debug, Default)]
-pub struct WitWorld {
+pub(crate) struct WitWorld {
     pub imports: HashSet<WitInterface>,
     pub exports: HashSet<WitInterface>,
 }
 
 /// A parsed WIT interface identifier with namespace, package, interfaces, and optional version.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct WitInterface {
+pub(crate) struct WitInterface {
     pub namespace: String,
     pub package: String,
     pub interfaces: BTreeSet<String>,
@@ -87,29 +87,29 @@ impl FromStr for WitInterface {
 
 impl WitInterface {
     /// Returns the fully qualified package identifier (`namespace:package`).
-    pub fn id(&self) -> super::common::InterfaceKey {
-        super::common::InterfaceKey {
+    pub(crate) fn id(&self) -> super::types::InterfaceKey {
+        super::types::InterfaceKey {
             namespace: self.namespace.clone(),
             package: self.package.clone(),
         }
     }
 
     /// Returns a semver version requirement derived from the interface version, if present.
-    pub fn version_req(&self) -> Option<semver::VersionReq> {
+    pub(crate) fn version_req(&self) -> Option<semver::VersionReq> {
         self.version
             .as_ref()
             .and_then(|v| semver::VersionReq::parse(&format!("^{}", v)).ok())
     }
 
     /// Returns the fully qualified names of all interfaces in this package.
-    pub fn interfaces(&self) -> impl Iterator<Item = String> {
+    pub(crate) fn interfaces(&self) -> impl Iterator<Item = String> {
         self.interfaces
             .iter()
             .map(|iface| format!("{}:{}/{iface}", self.namespace, self.package))
     }
 
     /// Computes the intersection of two interfaces from the same package.
-    pub fn intersect(&self, other: &WitInterface) -> Option<WitInterface> {
+    pub(crate) fn intersect(&self, other: &WitInterface) -> Option<WitInterface> {
         if self.namespace != other.namespace || self.package != other.package {
             return None;
         }
@@ -150,7 +150,7 @@ impl WitInterface {
     }
 
     /// Merges two interfaces from the same package, combining their interface sets.
-    pub fn merge(&self, other: &WitInterface) -> anyhow::Result<WitInterface> {
+    pub(crate) fn merge(&self, other: &WitInterface) -> anyhow::Result<WitInterface> {
         anyhow::ensure!(
             self.namespace == other.namespace,
             "interfaces have different namespaces"
